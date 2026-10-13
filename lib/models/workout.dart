@@ -5,16 +5,26 @@ class Workout {
   final DateTime date;
   final List<WorkoutExercise> exercises;
 
+  /// Optional name chosen by the user, e.g. "Push Day".
+  String? name;
+
+  /// When the workout was finished (null for older workouts).
+  DateTime? endTime;
+
   Workout({
     String? id,
     required this.date,
     required this.exercises,
+    this.name,
+    this.endTime,
   }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString();
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
+      'name': name,
       'date': date.toIso8601String(),
+      'endTime': endTime?.toIso8601String(),
       'exercises':
           exercises.map((exercise) => exercise.toJson()).toList(),
     };
@@ -31,7 +41,11 @@ class Workout {
 
     return Workout(
       id: json['id'],
+      name: json['name'] as String?,
       date: DateTime.parse(json['date']),
+      endTime: json['endTime'] != null
+          ? DateTime.parse(json['endTime'])
+          : null,
       exercises: exercises,
     );
   }

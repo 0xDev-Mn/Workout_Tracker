@@ -2,11 +2,13 @@ class WorkoutSet {
   double? weight;
   int? reps;
   bool isDropSet;
+  bool isDone;
 
   WorkoutSet({
     this.weight,
     this.reps,
     this.isDropSet = false,
+    this.isDone = false,
   });
 
   Map<String, dynamic> toJson() {
@@ -14,6 +16,7 @@ class WorkoutSet {
       'weight': weight,
       'reps': reps,
       'isDropSet': isDropSet,
+      'isDone': isDone,
     };
   }
 
@@ -24,6 +27,8 @@ class WorkoutSet {
           : null,
       reps: json['reps'] as int?,
       isDropSet: json['isDropSet'] ?? false,
+      // Workouts saved before this field existed simply load as "not done".
+      isDone: json['isDone'] ?? false,
     );
   }
 }

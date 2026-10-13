@@ -7,6 +7,7 @@ import '../models/workout.dart';
 class WorkoutStorage {
   static const String _workoutsKey = 'workouts';
   static const String _activeWorkoutKey = 'active_workout';
+  static const String _repairKey = 'repaired_unticked_sets_v1';
 
   // -----------------------------
   // ACTIVE WORKOUT
@@ -67,26 +68,119 @@ class WorkoutStorage {
     final savedWorkouts =
         prefs.getStringList(_workoutsKey) ?? [];
 
-    final workouts = savedWorkouts
-        .map(
-          (workout) => Workout.fromJson(
-            jsonDecode(workout),
-          ),
-        )
-        .toList();
+    final workouts = <Workout>[];
+    var needsMigration = false;
 
-    // Save the workouts again so older workouts
-    // receive and permanently store their new IDs.
-    await prefs.setStringList(
-      _workoutsKey,
-      workouts
-          .map(
-            (workout) => jsonEncode(workout.toJson()),
-          )
-          .toList(),
-    );
+    // One-time repair: sets that have weight/reps but were never ticked
+    // (saved before finishing counted them automatically) become counted.
+    final repairUnticked = !(prefs.getBool(_repairKey) ?? false);
+
+    for (final saved in savedWorkouts) {
+      final json = Map<String, dynamic>.from(jsonDecode(saved));
+
+      // Workouts saved by older versions of the app have no ID.
+      if (json['id'] == null) {
+        needsMigration = true;
+      }
+
+      // Sets saved before the "done" check existed have no isDone value.
+      // Treat the ones that have data as done so old history keeps counting.
+      for (final exercise in (json['exercises'] as List)) {
+        for (final set in (exercise['sets'] as List)) {
+          if (!set.containsKey('isDone')) {
+            set['isDone'] = set['weight'] != null || set['reps'] != null;
+            needsMigration = true;
+          }
+
+          if (repairUnticked &&
+              set['isDone'] != true &&
+              (set['weight'] != null || set['reps'] != null)) {
+            set['isDone'] = true;
+            needsMigration = true;
+          }
+        }
+      }
+
+      workouts.add(Workout.fromJson(json));
+    }
+
+    // Only write back when an old workout was just migrated (new ID or isDone),
+    // so normal reads never touch storage.
+    if (needsMigration) {
+      await prefs.setStringList(
+        _workoutsKey,
+        workouts
+            .map(
+              (workout) => jsonEncode(workout.toJson()),
+            )
+            .toList(),
+      );
+    }
+
+    if (repairUnticked) {
+      await prefs.setBool(_repairKey, true);
+    }
 
     return workouts;
+  }
+
+  /// Adds workouts that aren't saved yet (matched by id). Returns how many
+  /// were added. The stored list is kept oldest-first, because History
+  /// reverses it to show the newest first.
+  static Future<int> mergeWorkouts(List<Workout> incoming) async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getStringList(_workoutsKey) ?? [];
+
+    final ids = saved
+        .map((s) => (jsonDecode(s) as Map<String, dynamic>)['id'])
+        .toSet();
+
+    var added = 0;
+    for (final workout in incoming) {
+      if (ids.contains(workout.id)) continue;
+
+      saved.add(jsonEncode(workout.toJson()));
+      ids.add(workout.id);
+      added++;
+    }
+
+    if (added > 0) {
+      final decorated = saved
+          .map(
+            (s) => MapEntry(
+              DateTime.parse(
+                (jsonDecode(s) as Map<String, dynamic>)['date'] as String,
+              ),
+              s,
+            ),
+          )
+          .toList()
+        ..sort((a, b) => a.key.compareTo(b.key));
+
+      await prefs.setStringList(
+        _workoutsKey,
+        decorated.map((e) => e.value).toList(),
+      );
+    }
+
+    return added;
+  }
+
+  /// Overwrites a saved workout (matched by id), e.g. after renaming it.
+  static Future<void> updateWorkout(Workout workout) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final existingWorkouts =
+        prefs.getStringList(_workoutsKey) ?? [];
+
+    final updated = existingWorkouts.map((saved) {
+      final json = jsonDecode(saved) as Map<String, dynamic>;
+      return json['id'] == workout.id
+          ? jsonEncode(workout.toJson())
+          : saved;
+    }).toList();
+
+    await prefs.setStringList(_workoutsKey, updated);
   }
 
   static Future<void> deleteWorkout(Workout workout) async {
@@ -107,6 +201,41 @@ class WorkoutStorage {
       _workoutsKey,
       existingWorkouts,
     );
+  }
+
+  /// Heaviest weight ever logged (with reps) for each exercise, ignoring the
+  /// workout with [excludeWorkoutId]. Keys are exercise names.
+  static Future<Map<String, double>> getBestWeights({
+    String? excludeWorkoutId,
+  }) async {
+    final workouts = await getWorkouts();
+    final best = <String, double>{};
+
+    for (final workout in workouts) {
+      if (workout.id == excludeWorkoutId) continue;
+
+      for (final e in workout.exercises) {
+        for (final set in e.sets) {
+          final weight = set.weight;
+          final reps = set.reps;
+
+          if (!set.isDone ||
+              weight == null ||
+              reps == null ||
+              weight <= 0 ||
+              reps <= 0) {
+            continue;
+          }
+
+          final current = best[e.exercise.name];
+          if (current == null || weight > current) {
+            best[e.exercise.name] = weight;
+          }
+        }
+      }
+    }
+
+    return best;
   }
 
   static Future<Workout?> getPreviousWorkout(
@@ -134,5 +263,4 @@ class WorkoutStorage {
 
     return previousWorkouts.first;
   }
-
 }
