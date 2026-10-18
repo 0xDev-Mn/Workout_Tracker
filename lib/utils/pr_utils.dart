@@ -32,6 +32,8 @@ int? prSetIndex(List<WorkoutSet> sets, double? previousBest) {
   var bestWeight = previousBest;
 
   for (var i = 0; i < sets.length; i++) {
+    if (sets[i].isWarmup) continue; // warm-ups can't be records
+
     final weight = sets[i].weight;
     final reps = sets[i].reps;
 

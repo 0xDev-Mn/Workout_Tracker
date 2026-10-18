@@ -1,5 +1,6 @@
 import '../models/workout.dart';
 import '../models/workout_ex.dart';
+import '../services/unit_controller.dart';
 
 const _shortMonths = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
@@ -18,44 +19,68 @@ const _fullWeekdays = [
 
 DateTime _day(DateTime d) => DateTime(d.year, d.month, d.day);
 
-/// Exercises that have at least one set marked done.
-List<WorkoutExercise> doneExercises(Workout w) =>
-    w.exercises.where((e) => e.sets.any((s) => s.isDone)).toList();
+/// Exercises with at least one working set marked done.
+/// (Warm-up sets alone don't make an exercise count.)
+List<WorkoutExercise> doneExercises(Workout w) => w.exercises
+    .where((e) => e.sets.any((s) => s.isDone && !s.isWarmup))
+    .toList();
 
-/// Total weight x reps across all sets that are marked done.
+/// Total weight x reps across all working sets marked done (no warm-ups).
 double workoutVolume(Workout w) {
   var total = 0.0;
   for (final e in w.exercises) {
     for (final s in e.sets) {
-      if (!s.isDone) continue;
+      if (!s.isDone || s.isWarmup) continue;
       total += (s.weight ?? 0) * (s.reps ?? 0);
     }
   }
   return total;
 }
 
-/// Number of sets marked done that have a weight or reps filled in.
+/// Number of working sets marked done that have a weight or reps filled in.
 int workoutSetCount(Workout w) {
   var count = 0;
   for (final e in w.exercises) {
     count += e.sets
-        .where((s) => s.isDone && (s.weight != null || s.reps != null))
+        .where(
+          (s) =>
+              s.isDone &&
+              !s.isWarmup &&
+              (s.weight != null || s.reps != null),
+        )
         .length;
   }
   return count;
 }
 
-String formatVolume(double v) {
-  if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k kg';
-  return '${v.round()} kg';
+/// "kg" or "lb" — the unit currently shown on screen.
+String get unitLabel => UnitController.label;
+
+/// Total volume given in kg, shown in the current unit: "950 kg", "4.2k lb".
+String formatVolume(double kg) {
+  final v = UnitController.toDisplay(kg);
+  if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k $unitLabel';
+  return '${v.round()} $unitLabel';
 }
 
-/// 60.0 -> "60", 62.5 -> "62.5"
-String formatWeight(double? w) {
-  final value = w ?? 0;
-  return value == value.roundToDouble()
-      ? value.round().toString()
-      : value.toString();
+/// A weight given in kg, as a whole number in the current unit (for 1RM).
+String formatWeightRounded(double kg) =>
+    UnitController.toDisplay(kg).round().toString();
+
+/// A volume given in kg as a short number without the unit ("1.2k").
+String formatCompactVolume(double kg) =>
+    formatCompactNumber(UnitController.toDisplay(kg));
+
+/// A weight given in kg, shown in the current unit without the unit name:
+/// 60.0 -> "60", 62.5 -> "62.5" (kg) or "137.8" (lb).
+String formatWeight(double? kg) {
+  final shown = UnitController.toDisplay(kg ?? 0);
+  final rounded =
+      double.parse(shown.toStringAsFixed(UnitController.isLb ? 1 : 2));
+
+  return rounded == rounded.roundToDouble()
+      ? rounded.round().toString()
+      : rounded.toString();
 }
 
 /// "Today", "Yesterday", "3d ago", "Sep 23"

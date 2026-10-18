@@ -1,10 +1,9 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 import '../utils/progress_stats.dart';
 import '../utils/workout_format.dart';
+import '../widgets/trend_line_chart.dart';
 
 class ExerciseProgressScreen extends StatelessWidget {
   final ExerciseRecord record;
@@ -42,7 +41,7 @@ class ExerciseProgressScreen extends StatelessWidget {
                 children: [
                   Text('Top set weight', style: t.titleMedium),
                   const SizedBox(height: 2),
-                  Text('Heaviest set each workout (kg)', style: t.bodySmall),
+                  Text('Heaviest set each workout ($unitLabel)', style: t.bodySmall),
                   const SizedBox(height: 16),
                   if (sessions.length < 2)
                     Padding(
@@ -55,15 +54,8 @@ class ExerciseProgressScreen extends StatelessWidget {
                       ),
                     )
                   else ...[
-                    SizedBox(
-                      height: 180,
-                      child: CustomPaint(
-                        size: Size.infinite,
-                        painter: _LineChartPainter(
-                          values: sessions.map((s) => s.topWeight).toList(),
-                          colors: context.colors,
-                        ),
-                      ),
+                    TrendLineChart(
+                      values: sessions.map((s) => s.topWeight).toList(),
                     ),
                     const SizedBox(height: 8),
                     Row(
@@ -138,10 +130,10 @@ class ExerciseProgressScreen extends StatelessWidget {
         children: [
           stat(
             '${formatWeight(record.bestWeight)} × ${record.bestWeightReps}',
-            'Best set (kg)',
+            'Best set ($unitLabel)',
           ),
           divider(),
-          stat('${record.bestOneRm.round()} kg', 'Est. 1RM'),
+          stat('${formatWeightRounded(record.bestOneRm)} $unitLabel', 'Est. 1RM'),
           divider(),
           stat('${record.sessions.length}', 'Sessions'),
         ],
@@ -176,105 +168,11 @@ class _SessionRow extends StatelessWidget {
             ),
           ),
           Text(
-            '${formatWeight(session.topWeight)} kg × ${session.topWeightReps}',
+            '${formatWeight(session.topWeight)} $unitLabel × ${session.topWeightReps}',
             style: t.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
           ),
         ],
       ),
     );
   }
-}
-
-class _LineChartPainter extends CustomPainter {
-  final List<double> values;
-  final AppPalette colors;
-
-  const _LineChartPainter({required this.values, required this.colors});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (values.length < 2) return;
-
-    final minValue = values.reduce(math.min);
-    final maxValue = values.reduce(math.max);
-    final flat = maxValue == minValue;
-    final span = flat ? 1.0 : maxValue - minValue;
-
-    const top = 20.0;
-    const bottom = 8.0;
-    const side = 10.0;
-    final chartWidth = size.width - side * 2;
-    final chartHeight = size.height - top - bottom;
-
-    // Grid lines (top = max, middle, bottom = min).
-    final gridPaint = Paint()
-      ..color = colors.border
-      ..strokeWidth = 1;
-    for (var i = 0; i < 3; i++) {
-      final y = top + chartHeight * i / 2;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
-    }
-
-    // Axis labels.
-    void label(String text, double y) {
-      final painter = TextPainter(
-        text: TextSpan(
-          text: text,
-          style: TextStyle(fontSize: 10, color: colors.muted),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      painter.paint(canvas, Offset(0, y - painter.height - 2));
-    }
-
-    label(formatWeight(maxValue), top);
-    if (!flat) label(formatWeight(minValue), top + chartHeight);
-
-    Offset pointAt(int i) {
-      final x = side + chartWidth * i / (values.length - 1);
-      final y = flat
-          ? top + chartHeight / 2
-          : top + chartHeight * (1 - (values[i] - minValue) / span);
-      return Offset(x, y);
-    }
-
-    // Line.
-    final path = Path()..moveTo(pointAt(0).dx, pointAt(0).dy);
-    for (var i = 1; i < values.length; i++) {
-      final p = pointAt(i);
-      path.lineTo(p.dx, p.dy);
-    }
-
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = colors.ink
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.5
-        ..strokeJoin = StrokeJoin.round
-        ..strokeCap = StrokeCap.round,
-    );
-
-    // Dots.
-    final dotPaint = Paint()..color = colors.ink;
-    for (var i = 0; i < values.length - 1; i++) {
-      canvas.drawCircle(pointAt(i), 3.5, dotPaint);
-    }
-
-    // Latest point highlighted.
-    final last = pointAt(values.length - 1);
-    canvas.drawCircle(last, 7, Paint()..color = AppColors.accent);
-    canvas.drawCircle(
-      last,
-      7,
-      Paint()
-        ..color = colors.ink
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _LineChartPainter oldDelegate) =>
-      oldDelegate.values != values || oldDelegate.colors != colors;
 }

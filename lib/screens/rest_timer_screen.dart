@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/rest_timer_controller.dart';
+import '../services/notification_service.dart';
+
 import '../theme/app_theme.dart';
 
 enum _TimerPhase { setup, running, finished }

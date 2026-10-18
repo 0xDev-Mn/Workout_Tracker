@@ -3,10 +3,17 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../services/backup_service.dart';
+import '../services/goal_controller.dart';
+import '../services/notification_service.dart';
+import '../services/profile_controller.dart';
 import '../services/theme_controller.dart';
+import '../services/unit_controller.dart';
 import '../services/workout_events.dart';
 import '../theme/app_theme.dart';
 import 'appearance_sheet.dart';
+import 'goal_sheet.dart';
+import 'onboarding_screen.dart';
+import 'text_prompt_dialog.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -25,8 +32,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _showMessage(String title, String message) {
-    return showDialog<void>(
+  Future<void> _showMessage(String title, String message) async {
+    if (!mounted) return;
+    await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: context.colors.surface,
@@ -51,23 +59,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _busy = true);
 
     try {
-      final path = await BackupService.createBackupFile();
+      // Step 1: write the backup file.
+      String? path;
+      try {
+        path = await BackupService.createBackupFile();
+      } catch (e) {
+        await _showMessage('Could not create the backup file', '$e');
+        return;
+      }
 
       if (path == null) {
         _toast('Nothing to back up yet.');
         return;
       }
 
-      // Opens the phone's share sheet: save to Drive / Files, send to
-      // yourself, and so on.
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(path, mimeType: 'application/json')],
-          subject: 'RepTracker backup',
-        ),
-      );
-    } catch (_) {
-      _toast('Could not create the backup.');
+      // Step 2: open the phone's share sheet (save to Drive / Files, etc).
+      try {
+        await SharePlus.instance.share(
+          ShareParams(
+            files: [XFile(path, mimeType: 'application/json')],
+            subject: 'RepTracker backup',
+          ),
+        );
+      } catch (e) {
+        await _showMessage('Could not open the share sheet', '$e');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -108,7 +124,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             '${data.templates.length} '
             '${data.templates.length == 1 ? 'routine' : 'routines'} and '
             '${data.customExercises.length} custom '
-            '${data.customExercises.length == 1 ? 'exercise' : 'exercises'}.\n\n'
+            '${data.customExercises.length == 1 ? 'exercise' : 'exercises'}'
+            '${data.bodyWeights.isEmpty ? '' : ', plus ${data.bodyWeights.length} body-weight entries'}.\n\n'
             "They'll be added to what you already have. Nothing is deleted, "
             'and anything you already have is skipped.',
           ),
@@ -136,8 +153,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final result = await BackupService.restore(data);
       WorkoutEvents.notifyChanged();
       _toast(result.message);
-    } catch (_) {
-      _toast('Could not import that file.');
+    } catch (e) {
+      await _showMessage('Could not import that file', '$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _testNotification() async {
+    setState(() => _busy = true);
+
+    try {
+      final report = await NotificationService.runTest();
+      await _showMessage('Notification test', report);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -179,6 +207,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
         children: [
+          _SectionLabel('Profile'),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: ValueListenableBuilder<String>(
+              valueListenable: ProfileController.name,
+              builder: (context, name, _) => _SettingsRow(
+                icon: Icons.person_outline,
+                title: 'Name',
+                subtitle: name.isEmpty ? 'Not set' : name,
+                onTap: () async {
+                  final result = await showTextPrompt(
+                    context,
+                    title: 'Your name',
+                    hint: 'First name',
+                    initial: name,
+                    maxLength: 24,
+                  );
+                  if (result != null) await ProfileController.set(result);
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 28),
           _SectionLabel('Appearance'),
           Card(
             clipBehavior: Clip.antiAlias,
@@ -190,6 +241,97 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: _themeLabel(mode),
                 onTap: () => showAppearanceSheet(context),
               ),
+            ),
+          ),
+          const SizedBox(height: 28),
+          _SectionLabel('Units'),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.fitness_center,
+                    size: 22,
+                    color: context.colors.muted,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Weight', style: t.titleMedium),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Your data is always saved in kg',
+                          style: t.bodySmall?.copyWith(fontSize: 13),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ValueListenableBuilder<WeightUnit>(
+                    valueListenable: UnitController.unit,
+                    builder: (context, unit, _) => SegmentedButton<WeightUnit>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(value: WeightUnit.kg, label: Text('kg')),
+                        ButtonSegment(value: WeightUnit.lb, label: Text('lb')),
+                      ],
+                      selected: {unit},
+                      onSelectionChanged: (selection) async {
+                        await UnitController.set(selection.first);
+                        // Make Home, History and Progress redraw their numbers.
+                        WorkoutEvents.notifyChanged();
+                      },
+                      style: SegmentedButton.styleFrom(
+                        selectedBackgroundColor: AppColors.accent,
+                        selectedForegroundColor: AppColors.onAccent,
+                        foregroundColor: context.colors.ink,
+                        side: BorderSide(color: context.colors.border),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 28),
+          _SectionLabel('Training'),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: ValueListenableBuilder<int>(
+              valueListenable: GoalController.weeklyGoal,
+              builder: (context, goal, _) => _SettingsRow(
+                icon: Icons.flag_outlined,
+                title: 'Weekly goal',
+                subtitle: goal == 0
+                    ? 'Off'
+                    : '$goal ${goal == 1 ? 'workout' : 'workouts'} a week',
+                onTap: () => showWeeklyGoalSheet(context),
+              ),
+            ),
+          ),
+          const SizedBox(height: 28),
+          _SectionLabel('Notifications'),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                _SettingsRow(
+                  icon: Icons.notifications_active_outlined,
+                  title: 'Send test notification',
+                  subtitle: 'Check that rest timer alerts work on this phone',
+                  onTap: _busy ? null : _testNotification,
+                  showDivider: true,
+                ),
+                _SettingsRow(
+                  icon: Icons.settings_outlined,
+                  title: 'Open notification settings',
+                  subtitle: 'Turn alerts on or off in your phone settings',
+                  onTap: NotificationService.openSystemSettings,
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 28),
@@ -221,6 +363,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'Your data lives only on this phone. Export a backup now and '
               'then, and keep the file somewhere safe like Google Drive.',
               style: t.bodySmall?.copyWith(fontSize: 13),
+            ),
+          ),
+          const SizedBox(height: 28),
+          _SectionLabel('Help'),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: _SettingsRow(
+              icon: Icons.waving_hand_outlined,
+              title: 'Welcome tour',
+              subtitle: 'Replay the intro screens',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => OnboardingScreen(
+                    onFinished: () => Navigator.pop(context),
+                  ),
+                ),
+              ),
             ),
           ),
         ],

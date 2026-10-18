@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../models/exercise.dart';
 import '../models/workout.dart';
 import '../models/workout_template.dart';
+import '../services/goal_controller.dart';
+import '../services/profile_controller.dart';
 import '../services/template_storage.dart';
 import '../services/workout_events.dart';
 import '../services/workout_storage.dart';
@@ -10,6 +12,7 @@ import '../theme/app_theme.dart';
 import '../utils/workout_format.dart';
 import 'ex_lib.dart';
 import 'workout_details.dart';
+import 'goal_sheet.dart';
 import 'settings_screen.dart';
 import 'workout_actions.dart';
 import 'workout_history.dart';
@@ -25,10 +28,7 @@ DateTime _day(DateTime d) => DateTime(d.year, d.month, d.day);
 
 double _volume(Workout w) => workoutVolume(w);
 
-String _formatVolume(double v) {
-  if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k kg';
-  return '${v.round()} kg';
-}
+String _formatVolume(double kg) => formatVolume(kg);
 
 String _formatDate(DateTime d) {
   final diff = _day(DateTime.now()).difference(_day(d)).inDays;
@@ -220,6 +220,15 @@ class _HomeScreenState extends State<HomeScreen> {
               _buildHeroCard(context),
               const SizedBox(height: 20),
               _buildWeekStrip(context),
+              ValueListenableBuilder<int>(
+                valueListenable: GoalController.weeklyGoal,
+                builder: (context, goal, _) => goal > 0
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 16),
+                        child: _buildGoalCard(context, goal),
+                      )
+                    : const SizedBox.shrink(),
+              ),
               const SizedBox(height: 12),
               _buildStats(context),
               const SizedBox(height: 28),
@@ -252,7 +261,13 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Text(date, style: t.bodySmall),
               const SizedBox(height: 2),
-              Text(_greeting, style: t.headlineMedium),
+              ValueListenableBuilder<String>(
+                valueListenable: ProfileController.name,
+                builder: (context, name, _) => Text(
+                  name.isEmpty ? _greeting : '$_greeting, $name',
+                  style: t.headlineMedium,
+                ),
+              ),
             ],
           ),
         ),
@@ -395,6 +410,88 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         );
       }),
+    );
+  }
+
+  // ---- weekly goal ----
+
+  Widget _buildGoalCard(BuildContext context, int goal) {
+    final t = Theme.of(context).textTheme;
+    final done = _thisWeek.length;
+    final reached = done >= goal;
+    final remaining = goal - done;
+
+    return InkWell(
+      onTap: () => showWeeklyGoalSheet(context),
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: context.colors.surface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: context.colors.border),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 56,
+              height: 56,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox.expand(
+                    child: CircularProgressIndicator(
+                      value: (done / goal).clamp(0.0, 1.0),
+                      strokeWidth: 6,
+                      strokeCap: StrokeCap.round,
+                      backgroundColor: context.colors.border,
+                      valueColor:
+                          const AlwaysStoppedAnimation<Color>(AppColors.accent),
+                    ),
+                  ),
+                  reached
+                      ? Icon(
+                          Icons.check_rounded,
+                          size: 26,
+                          color: context.colors.ink,
+                        )
+                      : Text(
+                          '$done/$goal',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: context.colors.ink,
+                          ),
+                        ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Weekly goal', style: t.titleMedium),
+                  const SizedBox(height: 2),
+                  Text(
+                    reached
+                        ? 'Goal reached — nice work!'
+                        : '$remaining more '
+                            '${remaining == 1 ? 'workout' : 'workouts'} '
+                            'to hit your goal',
+                    style: t.bodySmall?.copyWith(fontSize: 14),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right,
+              size: 18,
+              color: context.colors.muted,
+            ),
+          ],
+        ),
+      ),
     );
   }
 

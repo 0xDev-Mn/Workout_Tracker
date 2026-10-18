@@ -47,7 +47,12 @@ class _WorkoutSummaryScreenState extends State<WorkoutSummaryScreen> {
   }
 
   List<WorkoutSet> _countedSets(WorkoutExercise e) => e.sets
-      .where((s) => s.isDone && (s.weight != null || s.reps != null))
+      .where(
+        (s) =>
+            s.isDone &&
+            !s.isWarmup &&
+            (s.weight != null || s.reps != null),
+      )
       .toList();
 
   /// "best 80 kg × 8" (or "best 12 reps" for bodyweight exercises)
@@ -64,7 +69,7 @@ class _WorkoutSummaryScreenState extends State<WorkoutSummaryScreen> {
 
     if (best == null) return '';
     if ((best.weight ?? 0) > 0) {
-      return 'best ${formatWeight(best.weight)} kg × ${best.reps ?? 0}';
+      return 'best ${formatWeight(best.weight)} $unitLabel × ${best.reps ?? 0}';
     }
     return 'best ${best.reps ?? 0} reps';
   }
@@ -329,7 +334,7 @@ class _RecordsCard extends StatelessWidget {
                         Text(record.exerciseName, style: t.titleMedium),
                         const SizedBox(height: 2),
                         Text(
-                          'Previous best ${formatWeight(record.previousBest)} kg',
+                          'Previous best ${formatWeight(record.previousBest)} $unitLabel',
                           style: t.bodySmall?.copyWith(fontSize: 13),
                         ),
                       ],
@@ -340,7 +345,7 @@ class _RecordsCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        '${formatWeight(record.weight)} kg',
+                        '${formatWeight(record.weight)} $unitLabel',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
@@ -349,7 +354,7 @@ class _RecordsCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '+${formatWeight(record.increase)} kg',
+                        '+${formatWeight(record.increase)} $unitLabel',
                         style: t.bodySmall?.copyWith(
                           fontWeight: FontWeight.w600,
                           color: context.colors.ink,

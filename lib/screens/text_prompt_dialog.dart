@@ -3,12 +3,16 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 
 /// Small dialog with one text field. Returns the text, or null if cancelled.
+/// Use [maxLines] > 1 for longer text such as notes.
 Future<String?> showTextPrompt(
   BuildContext context, {
   required String title,
   required String hint,
   String initial = '',
   String confirmLabel = 'Save',
+  int maxLength = 40,
+  int maxLines = 1,
+  TextCapitalization capitalization = TextCapitalization.words,
 }) {
   return showDialog<String>(
     context: context,
@@ -17,6 +21,9 @@ Future<String?> showTextPrompt(
       hint: hint,
       initial: initial,
       confirmLabel: confirmLabel,
+      maxLength: maxLength,
+      maxLines: maxLines,
+      capitalization: capitalization,
     ),
   );
 }
@@ -26,12 +33,18 @@ class _TextPromptDialog extends StatefulWidget {
   final String hint;
   final String initial;
   final String confirmLabel;
+  final int maxLength;
+  final int maxLines;
+  final TextCapitalization capitalization;
 
   const _TextPromptDialog({
     required this.title,
     required this.hint,
     required this.initial,
     required this.confirmLabel,
+    required this.maxLength,
+    required this.maxLines,
+    required this.capitalization,
   });
 
   @override
@@ -55,6 +68,8 @@ class _TextPromptDialogState extends State<_TextPromptDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final multiline = widget.maxLines > 1;
+
     return AlertDialog(
       backgroundColor: context.colors.surface,
       surfaceTintColor: Colors.transparent,
@@ -65,15 +80,19 @@ class _TextPromptDialogState extends State<_TextPromptDialog> {
       content: TextField(
         controller: _controller,
         autofocus: true,
-        maxLength: 40,
-        textCapitalization: TextCapitalization.words,
-        textInputAction: TextInputAction.done,
+        minLines: 1,
+        maxLines: widget.maxLines,
+        maxLength: widget.maxLength,
+        textCapitalization: widget.capitalization,
+        keyboardType: multiline ? TextInputType.multiline : TextInputType.text,
+        textInputAction:
+            multiline ? TextInputAction.newline : TextInputAction.done,
         decoration: InputDecoration(
           hintText: widget.hint,
           hintStyle: TextStyle(color: context.colors.hint),
           counterText: '',
         ),
-        onSubmitted: (value) => Navigator.pop(context, value),
+        onSubmitted: multiline ? null : (value) => Navigator.pop(context, value),
       ),
       actions: [
         TextButton(

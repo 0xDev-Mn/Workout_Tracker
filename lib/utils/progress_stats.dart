@@ -13,6 +13,30 @@ double estimateOneRm(double weight, int reps) {
 DateTime weekStartOf(DateTime d) =>
     DateTime(d.year, d.month, d.day - (d.weekday - 1));
 
+/// Muscle groups in the order they are listed on the Progress tab.
+const List<String> kMuscleGroups = [
+  'Chest',
+  'Back',
+  'Shoulders',
+  'Arms',
+  'Legs',
+  'Core',
+  'Other',
+];
+
+/// Working sets one exercise contributed to a muscle group in a workout.
+class MuscleSetEntry {
+  final DateTime date;
+  final String group;
+  final int sets;
+
+  const MuscleSetEntry({
+    required this.date,
+    required this.group,
+    required this.sets,
+  });
+}
+
 class WeekBucket {
   final DateTime start;
   int workouts = 0;
@@ -70,13 +94,29 @@ class ProgressStats {
   /// Most recently trained first.
   final List<ExerciseRecord> records;
 
+  /// One entry per exercise per workout (working sets that are done).
+  final List<MuscleSetEntry> muscleEntries;
+
   const ProgressStats({
     required this.totalWorkouts,
     required this.totalVolume,
     required this.avgPerWeek,
     required this.weeks,
     required this.records,
+    required this.muscleEntries,
   });
+
+  /// Total sets per muscle group since [since] (everything when null).
+  Map<String, int> setsByMuscle({DateTime? since}) {
+    final result = <String, int>{};
+
+    for (final entry in muscleEntries) {
+      if (since != null && entry.date.isBefore(since)) continue;
+      result[entry.group] = (result[entry.group] ?? 0) + entry.sets;
+    }
+
+    return result;
+  }
 
   static ProgressStats from(List<Workout> workouts, {int weekCount = 8}) {
     final thisWeek = weekStartOf(DateTime.now());
@@ -96,6 +136,7 @@ class ProgressStats {
     final sorted = [...workouts]..sort((a, b) => a.date.compareTo(b.date));
 
     var totalVolume = 0.0;
+    final muscleEntries = <MuscleSetEntry>[];
     final sessionsByExercise = <String, List<SessionPoint>>{};
     final muscleByExercise = <String, String>{};
 
@@ -110,12 +151,34 @@ class ProgressStats {
       }
 
       for (final we in workout.exercises) {
+        // Working sets that count toward the muscle-group breakdown.
+        final countedSets = we.sets
+            .where(
+              (s) =>
+                  s.isDone &&
+                  !s.isWarmup &&
+                  (s.weight != null || s.reps != null),
+            )
+            .length;
+
+        if (countedSets > 0) {
+          final group = we.exercise.muscleGroup.trim();
+          muscleEntries.add(
+            MuscleSetEntry(
+              date: workout.date,
+              group: kMuscleGroups.contains(group) ? group : 'Other',
+              sets: countedSets,
+            ),
+          );
+        }
+
         double? topWeight;
         var topReps = 0;
         var bestRm = 0.0;
 
         for (final set in we.sets) {
           if (!set.isDone) continue; // only sets marked done count
+          if (set.isWarmup) continue; // warm-ups don't count
           final weight = set.weight;
           final reps = set.reps;
           if (weight == null || reps == null || weight <= 0 || reps <= 0) {
@@ -189,6 +252,7 @@ class ProgressStats {
       avgPerWeek: avgPerWeek,
       weeks: weeks,
       records: records,
+      muscleEntries: muscleEntries,
     );
   }
 }

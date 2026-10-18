@@ -2,12 +2,19 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../models/body_weight_entry.dart';
+import '../services/body_weight_storage.dart';
 import '../services/workout_events.dart';
 import '../services/workout_storage.dart';
 import '../theme/app_theme.dart';
 import '../utils/progress_stats.dart';
 import '../utils/workout_format.dart';
+import '../widgets/body_weight_sheet.dart';
+import '../widgets/trend_line_chart.dart';
+import 'body_weight_screen.dart';
 import 'exercise_progress_screen.dart';
+
+enum _MusclePeriod { week, month, all }
 
 class ProgressScreen extends StatefulWidget {
   const ProgressScreen({super.key});
@@ -18,7 +25,11 @@ class ProgressScreen extends StatefulWidget {
 
 class _ProgressScreenState extends State<ProgressScreen> {
   ProgressStats? _stats;
+  List<BodyWeightEntry> _bodyWeights = []; // oldest first
   bool _loading = true;
+
+  // Period shown in the muscle-group card.
+  _MusclePeriod _musclePeriod = _MusclePeriod.week;
 
   // Search inside "Personal records".
   bool _searching = false;
@@ -56,10 +67,12 @@ class _ProgressScreenState extends State<ProgressScreen> {
 
   Future<void> _load() async {
     final workouts = await WorkoutStorage.getWorkouts();
+    final bodyWeights = await BodyWeightStorage.getEntries();
     if (!mounted) return;
 
     setState(() {
       _stats = ProgressStats.from(workouts);
+      _bodyWeights = bodyWeights;
       _loading = false;
     });
   }
@@ -101,13 +114,26 @@ class _ProgressScreenState extends State<ProgressScreen> {
                     const SizedBox(height: 12),
                     _ChartCard(
                       title: 'Weekly volume',
-                      subtitle: 'Total weight lifted (kg)',
+                      subtitle: 'Total weight lifted ($unitLabel)',
                       child: _WeeklyBars(
                         values: stats.weeks.map((w) => w.volume).toList(),
                         labels:
                             stats.weeks.map((w) => formatShortDate(w.start)).toList(),
-                        format: formatCompactNumber,
+                        format: formatCompactVolume,
                       ),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildMuscleCard(context, stats),
+                    const SizedBox(height: 12),
+                    _BodyWeightCard(
+                      entries: _bodyWeights,
+                      onOpen: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const BodyWeightScreen(),
+                        ),
+                      ),
+                      onLog: () => showBodyWeightSheet(context),
                     ),
                     const SizedBox(height: 28),
                     _buildRecords(context, stats),
@@ -176,6 +202,64 @@ class _ProgressScreenState extends State<ProgressScreen> {
           divider(),
           stat(stats.avgPerWeek.toStringAsFixed(1), 'Avg / week'),
         ],
+      ),
+    );
+  }
+
+  DateTime? get _muscleSince {
+    final now = DateTime.now();
+
+    switch (_musclePeriod) {
+      case _MusclePeriod.week:
+        return weekStartOf(now);
+      case _MusclePeriod.month:
+        return DateTime(now.year, now.month, now.day - 29);
+      case _MusclePeriod.all:
+        return null;
+    }
+  }
+
+  Widget _buildMuscleCard(BuildContext context, ProgressStats stats) {
+    final t = Theme.of(context).textTheme;
+    final counts = stats.setsByMuscle(since: _muscleSince);
+
+    final groups = kMuscleGroups
+        .where((g) => g != 'Other' || (counts['Other'] ?? 0) > 0)
+        .toList();
+    final maxSets = groups.fold<int>(0, (m, g) => math.max(m, counts[g] ?? 0));
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Muscle groups', style: t.titleMedium),
+            const SizedBox(height: 2),
+            Text('Sets per muscle group', style: t.bodySmall),
+            const SizedBox(height: 14),
+            _PeriodChips(
+              selected: _musclePeriod,
+              onChanged: (p) => setState(() => _musclePeriod = p),
+            ),
+            const SizedBox(height: 14),
+            if (maxSets == 0)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Text(
+                  'No sets logged in this period.',
+                  style: t.bodySmall?.copyWith(fontSize: 14),
+                ),
+              )
+            else
+              for (final group in groups)
+                _MuscleRow(
+                  label: group,
+                  sets: counts[group] ?? 0,
+                  maxSets: maxSets,
+                ),
+          ],
+        ),
       ),
     );
   }
@@ -473,7 +557,7 @@ class _RecordRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'Best ${formatWeight(record.bestWeight)} kg × '
+                    'Best ${formatWeight(record.bestWeight)} $unitLabel × '
                     '${record.bestWeightReps}',
                     style: t.bodySmall?.copyWith(fontSize: 14),
                   ),
@@ -485,7 +569,7 @@ class _RecordRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '${record.bestOneRm.round()} kg',
+                  '${formatWeightRounded(record.bestOneRm)} $unitLabel',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
@@ -498,6 +582,212 @@ class _RecordRow extends StatelessWidget {
             const SizedBox(width: 4),
             Icon(Icons.chevron_right, size: 18, color: context.colors.muted),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PeriodChips extends StatelessWidget {
+  final _MusclePeriod selected;
+  final ValueChanged<_MusclePeriod> onChanged;
+
+  const _PeriodChips({required this.selected, required this.onChanged});
+
+  String _label(_MusclePeriod p) {
+    switch (p) {
+      case _MusclePeriod.week:
+        return 'This week';
+      case _MusclePeriod.month:
+        return '30 days';
+      case _MusclePeriod.all:
+        return 'All time';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final period in _MusclePeriod.values)
+          ChoiceChip(
+            label: Text(_label(period)),
+            selected: selected == period,
+            showCheckmark: false,
+            onSelected: (_) => onChanged(period),
+            selectedColor: AppColors.accent,
+            backgroundColor: context.colors.bg,
+            shape: StadiumBorder(
+              side: BorderSide(
+                color: selected == period
+                    ? AppColors.accent
+                    : context.colors.border,
+              ),
+            ),
+            labelStyle: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: selected == period
+                  ? AppColors.onAccent
+                  : context.colors.ink,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _MuscleRow extends StatelessWidget {
+  final String label;
+  final int sets;
+  final int maxSets;
+
+  const _MuscleRow({
+    required this.label,
+    required this.sets,
+    required this.maxSets,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        children: [
+          SizedBox(width: 84, child: Text(label, style: t.bodyMedium)),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: maxSets == 0 ? 0 : sets / maxSets,
+                minHeight: 10,
+                backgroundColor: context.colors.border,
+                valueColor:
+                    const AlwaysStoppedAnimation<Color>(AppColors.accent),
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 40,
+            child: Text(
+              '$sets',
+              textAlign: TextAlign.right,
+              style: t.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BodyWeightCard extends StatelessWidget {
+  final List<BodyWeightEntry> entries; // oldest first
+  final VoidCallback onOpen;
+  final VoidCallback onLog;
+
+  const _BodyWeightCard({
+    required this.entries,
+    required this.onOpen,
+    required this.onLog,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final latest = entries.isEmpty ? null : entries.last;
+
+    final now = DateTime.now();
+    final since = DateTime(now.year, now.month, now.day - 89);
+    final recent = entries.where((e) => !e.date.isBefore(since)).toList();
+    final change =
+        latest != null && recent.length >= 2 ? latest.kg - recent.first.kg : null;
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: latest == null ? onLog : onOpen,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 8, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: Text('Body weight', style: t.titleMedium)),
+                  IconButton(
+                    tooltip: 'Log weight',
+                    visualDensity: VisualDensity.compact,
+                    icon: Icon(
+                      Icons.add_rounded,
+                      color: context.colors.muted,
+                    ),
+                    onPressed: onLog,
+                  ),
+                ],
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: latest == null
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Track your weight over time.',
+                            style: t.bodySmall?.copyWith(fontSize: 14),
+                          ),
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: onLog,
+                            icon: const Icon(Icons.add_rounded, size: 20),
+                            label: const Text('Log weight'),
+                          ),
+                        ],
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                '${formatWeight(latest.kg)} $unitLabel',
+                                style: TextStyle(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w700,
+                                  color: context.colors.ink,
+                                ),
+                              ),
+                              if (change != null) ...[
+                                const SizedBox(width: 10),
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 4),
+                                  child: Text(
+                                    '${change >= 0 ? '+' : '−'}'
+                                    '${formatWeight(change.abs())} '
+                                    '$unitLabel · 90 days',
+                                    style: t.bodySmall,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          if (recent.length >= 2) ...[
+                            const SizedBox(height: 8),
+                            TrendLineChart(
+                              values: recent.map((e) => e.kg).toList(),
+                              height: 110,
+                            ),
+                          ],
+                        ],
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );

@@ -3,9 +3,11 @@ import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
+import '../models/body_weight_entry.dart';
 import '../models/exercise.dart';
 import '../models/workout.dart';
 import '../models/workout_template.dart';
+import 'body_weight_storage.dart';
 import 'exercise_storage.dart';
 import 'template_storage.dart';
 import 'workout_storage.dart';
@@ -15,11 +17,13 @@ class BackupData {
   final List<Workout> workouts;
   final List<WorkoutTemplate> templates;
   final List<Exercise> customExercises;
+  final List<BodyWeightEntry> bodyWeights;
 
   const BackupData({
     required this.workouts,
     required this.templates,
     required this.customExercises,
+    this.bodyWeights = const [],
   });
 }
 
@@ -28,11 +32,13 @@ class RestoreResult {
   final int workoutsAdded;
   final int templatesAdded;
   final int exercisesAdded;
+  final int bodyWeightsAdded;
 
   const RestoreResult({
     required this.workoutsAdded,
     required this.templatesAdded,
     required this.exercisesAdded,
+    this.bodyWeightsAdded = 0,
   });
 
   String get message {
@@ -44,6 +50,8 @@ class RestoreResult {
       if (templatesAdded > 0) plural(templatesAdded, 'routine', 'routines'),
       if (exercisesAdded > 0)
         plural(exercisesAdded, 'custom exercise', 'custom exercises'),
+      if (bodyWeightsAdded > 0)
+        plural(bodyWeightsAdded, 'weigh-in', 'weigh-ins'),
     ];
 
     if (parts.isEmpty) {
@@ -63,8 +71,12 @@ class BackupService {
     final workouts = await WorkoutStorage.getWorkouts();
     final templates = await TemplateStorage.getTemplates();
     final exercises = await ExerciseStorage.getCustomExercises();
+    final bodyWeights = await BodyWeightStorage.getEntries();
 
-    if (workouts.isEmpty && templates.isEmpty && exercises.isEmpty) {
+    if (workouts.isEmpty &&
+        templates.isEmpty &&
+        exercises.isEmpty &&
+        bodyWeights.isEmpty) {
       return null;
     }
 
@@ -77,6 +89,7 @@ class BackupService {
       'customExercises': exercises
           .map((e) => {'name': e.name, 'muscleGroup': e.muscleGroup})
           .toList(),
+      'bodyWeights': bodyWeights.map((b) => b.toJson()).toList(),
     };
 
     final dir = await getTemporaryDirectory();
@@ -115,10 +128,15 @@ class BackupService {
         );
       }).toList();
 
+      final bodyWeights = (decoded['bodyWeights'] as List? ?? [])
+          .map((b) => BodyWeightEntry.fromJson(Map<String, dynamic>.from(b)))
+          .toList();
+
       return BackupData(
         workouts: workouts,
         templates: templates,
         customExercises: exercises,
+        bodyWeights: bodyWeights,
       );
     } catch (_) {
       return null;
@@ -134,10 +152,14 @@ class BackupService {
     final exercises =
         await ExerciseStorage.mergeCustomExercises(data.customExercises);
 
+    final bodyWeights =
+        await BodyWeightStorage.mergeEntries(data.bodyWeights);
+
     return RestoreResult(
       workoutsAdded: workouts,
       templatesAdded: templates,
       exercisesAdded: exercises,
+      bodyWeightsAdded: bodyWeights,
     );
   }
 }

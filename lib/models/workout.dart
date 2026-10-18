@@ -11,18 +11,23 @@ class Workout {
   /// When the workout was finished (null for older workouts).
   DateTime? endTime;
 
+  /// Optional note about the whole workout.
+  String? notes;
+
   Workout({
     String? id,
     required this.date,
     required this.exercises,
     this.name,
     this.endTime,
+    this.notes,
   }) : id = id ?? DateTime.now().microsecondsSinceEpoch.toString();
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
       'name': name,
+      'notes': notes,
       'date': date.toIso8601String(),
       'endTime': endTime?.toIso8601String(),
       'exercises':
@@ -42,6 +47,7 @@ class Workout {
     return Workout(
       id: json['id'],
       name: json['name'] as String?,
+      notes: json['notes'] as String?,
       date: DateTime.parse(json['date']),
       endTime: json['endTime'] != null
           ? DateTime.parse(json['endTime'])

@@ -9,6 +9,17 @@ class WorkoutStorage {
   static const String _activeWorkoutKey = 'active_workout';
   static const String _repairKey = 'repaired_unticked_sets_v1';
 
+  // In-memory copy of the saved workouts so the tabs don't each re-parse all
+  // the JSON on startup. Cleared whenever workouts are written.
+  static List<Workout>? _cache;
+  static Future<List<Workout>>? _loading;
+  static int _version = 0;
+
+  static void _invalidate() {
+    _version++;
+    _cache = null;
+  }
+
   // -----------------------------
   // ACTIVE WORKOUT
   // -----------------------------
@@ -60,9 +71,27 @@ class WorkoutStorage {
       _workoutsKey,
       existingWorkouts,
     );
+
+    _invalidate();
   }
 
   static Future<List<Workout>> getWorkouts() async {
+    final cached = _cache;
+    if (cached != null) return List<Workout>.of(cached);
+
+    // Several screens ask at the same time on startup: share one read.
+    final startVersion = _version;
+    final loading = _loading ??= _readWorkouts()
+        .then((list) {
+          if (_version == startVersion) _cache = list;
+          return list;
+        })
+        .whenComplete(() => _loading = null);
+
+    return List<Workout>.of(await loading);
+  }
+
+  static Future<List<Workout>> _readWorkouts() async {
     final prefs = await SharedPreferences.getInstance();
 
     final savedWorkouts =
@@ -163,6 +192,7 @@ class WorkoutStorage {
       );
     }
 
+    _invalidate();
     return added;
   }
 
@@ -181,6 +211,8 @@ class WorkoutStorage {
     }).toList();
 
     await prefs.setStringList(_workoutsKey, updated);
+
+    _invalidate();
   }
 
   static Future<void> deleteWorkout(Workout workout) async {
@@ -201,6 +233,8 @@ class WorkoutStorage {
       _workoutsKey,
       existingWorkouts,
     );
+
+    _invalidate();
   }
 
   /// Heaviest weight ever logged (with reps) for each exercise, ignoring the
@@ -220,6 +254,7 @@ class WorkoutStorage {
           final reps = set.reps;
 
           if (!set.isDone ||
+              set.isWarmup ||
               weight == null ||
               reps == null ||
               weight <= 0 ||

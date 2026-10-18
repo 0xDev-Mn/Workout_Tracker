@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../models/workout.dart';
+import '../models/workout_set.dart';
 import '../services/workout_events.dart';
 import '../services/workout_storage.dart';
 import '../theme/app_theme.dart';
 import '../utils/workout_format.dart';
+import '../widgets/set_type_badge.dart';
 import 'rename_workout_dialog.dart';
 import 'template_actions.dart';
+import 'text_prompt_dialog.dart';
 import 'workout_actions.dart';
 
 class WorkoutDetailsScreen extends StatefulWidget {
@@ -62,6 +65,63 @@ class _WorkoutDetailsScreenState extends State<WorkoutDetailsScreen> {
     if (!context.mounted) return;
 
     Navigator.pop(context, true);
+  }
+
+  Future<void> _editNote() async {
+    final result = await showTextPrompt(
+      context,
+      title: 'Workout note',
+      hint: 'How did it feel?',
+      initial: workout.notes ?? '',
+      confirmLabel: 'Save',
+      maxLength: 500,
+      maxLines: 6,
+      capitalization: TextCapitalization.sentences,
+    );
+
+    if (result == null) return;
+
+    final trimmed = result.trim();
+    workout.notes = trimmed.isEmpty ? null : trimmed;
+
+    await WorkoutStorage.updateWorkout(workout);
+    WorkoutEvents.notifyChanged();
+
+    if (mounted) setState(() {});
+  }
+
+  Widget _buildNote(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+    final note = (workout.notes ?? '').trim();
+
+    return InkWell(
+      onTap: _editNote,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: context.colors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: context.colors.border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.notes_rounded, size: 20, color: context.colors.muted),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                note.isEmpty ? 'Add a note' : note,
+                style: note.isEmpty
+                    ? t.bodySmall?.copyWith(fontSize: 14)
+                    : t.bodyMedium,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -134,6 +194,8 @@ class _WorkoutDetailsScreenState extends State<WorkoutDetailsScreen> {
           const SizedBox(height: 20),
           _SummaryRow(workout: workout),
           const SizedBox(height: 20),
+          _buildNote(context),
+          const SizedBox(height: 20),
           ...doneExercises(workout).map((workoutExercise) {
             final recordedSets = workoutExercise.sets
                 .where(
@@ -156,9 +218,35 @@ class _WorkoutDetailsScreenState extends State<WorkoutDetailsScreen> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        workoutExercise.exercise.muscleGroup,
+                        workoutExercise.supersetId != null
+                            ? '${workoutExercise.exercise.muscleGroup} · Superset'
+                            : workoutExercise.exercise.muscleGroup,
                         style: t.bodySmall,
                       ),
+                      if ((workoutExercise.notes ?? '').trim().isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              Icons.sticky_note_2_outlined,
+                              size: 16,
+                              color: context.colors.muted,
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                workoutExercise.notes!.trim(),
+                                style: t.bodyMedium?.copyWith(
+                                  fontSize: 13,
+                                  fontStyle: FontStyle.italic,
+                                  color: context.colors.muted,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       if (recordedSets.isEmpty)
                         Text(
@@ -193,32 +281,15 @@ class _WorkoutDetailsScreenState extends State<WorkoutDetailsScreen> {
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Text(
-                                    '${formatWeight(set.weight)} kg  ×  '
+                                    '${formatWeight(set.weight)} $unitLabel  ×  '
                                     '${set.reps ?? 0}',
                                     style: t.bodyLarge?.copyWith(
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
                                 ),
-                                if (set.isDropSet)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 3,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: context.colors.accentSoft,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      'Drop set',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: context.colors.ink,
-                                      ),
-                                    ),
-                                  ),
+                                if (set.type != SetType.normal)
+                                  SetTypeTag(type: set.type),
                               ],
                             ),
                           );
