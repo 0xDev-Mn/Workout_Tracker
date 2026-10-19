@@ -13,6 +13,7 @@ import '../theme/app_theme.dart';
 import 'appearance_sheet.dart';
 import 'goal_sheet.dart';
 import 'onboarding_screen.dart';
+import 'privacy_policy_screen.dart';
 import 'text_prompt_dialog.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -379,6 +380,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   builder: (context) => OnboardingScreen(
                     onFinished: () => Navigator.pop(context),
                   ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 28),
+          _SectionLabel('About'),
+          Card(
+            clipBehavior: Clip.antiAlias,
+            child: _SettingsRow(
+              icon: Icons.privacy_tip_outlined,
+              title: 'Privacy policy',
+              subtitle: 'How RepTracker handles your data',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const PrivacyPolicyScreen(),
                 ),
               ),
             ),
